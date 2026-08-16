@@ -38,10 +38,15 @@ class QuizResponse(BaseModel):
 # Sidebar
 with st.sidebar:
     st.header("⚙️ Exam Settings")
-    api_key = st.text_input("Gemini API Key:", type="password", help="aistudio.google.com se free key milti hai")
-    num_q = st.select_slider("Kitne Questions Chahiye?", options=[10, 20, 30, 40, 50], value=20)
-    st.markdown("---")
-    st.caption("🔒 **Strict CG Vyapam 10-Pattern Engine Active**")
+        api_key = st.secrets.get("GEMINI_API_KEY", "")
+        if not api_key:
+            api_key = st.text_input("Gemini API Key:", type="password")
+        else:
+            st.success("🔑 API Key Auto-Connected!")
+            
+        num_q = st.select_slider("Kitne Questions Chahiye?", options=[10, 20, 30, 40, 50], value=20)
+        st.markdown("---")
+        st.caption("🔒 **Strict CG Vyapam 10-Pattern Engine Active**")
 
 # Main Interface
 st.title("🎯 CG Vyapam 50-MCQ Practice Engine")
