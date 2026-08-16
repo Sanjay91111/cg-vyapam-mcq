@@ -1,13 +1,8 @@
-import os
-import json
 import streamlit as st
-from enum import Enum
-from pydantic import BaseModel, Field
-from typing import List
-from google import genai
-from google.genai import types
+import json
+import google.generativeai as genai
 
-# Modern Wide UI Configuration
+# Page Config for FydeOS / PWA Desktop View
 st.set_page_config(
     page_title="CG Vyapam FWLN26 Practice Engine",
     page_icon="⚡",
@@ -15,346 +10,457 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Dark-Mode Modern Glassmorphism CSS
+# Custom Styling for Practice UI
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-    * { font-family: 'Inter', sans-serif; }
-    
-    .stApp {
-        background-color: #0d1117;
-        color: #c9d1d9;
-    }
-    
     .main-header {
-        background: linear-gradient(135deg, #1f2937 0%, #111827 100%);
-        border: 1px solid #374151;
+        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+        padding: 22px;
         border-radius: 12px;
-        padding: 24px;
-        margin-bottom: 25px;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+        border: 1px solid #334155;
+        margin-bottom: 20px;
     }
-    
-    .main-title {
-        font-size: 28px;
-        font-weight: 700;
-        color: #60a5fa;
-        margin-bottom: 6px;
-    }
-    
-    .main-subtitle {
-        font-size: 14px;
-        color: #9ca3af;
-    }
-    
-    .q-card {
-        background-color: #161b22;
-        border: 1px solid #30363d;
+    .question-card {
+        background-color: #1e293b;
+        border: 1px solid #334155;
         border-radius: 10px;
-        padding: 20px;
-        margin-bottom: 18px;
-        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
-    }
-    
-    .badge-pattern {
-        display: inline-block;
-        background: rgba(59, 130, 246, 0.15);
-        color: #93c5fd;
-        border: 1px solid rgba(59, 130, 246, 0.3);
-        padding: 4px 10px;
-        border-radius: 20px;
-        font-size: 11px;
-        font-weight: 600;
+        padding: 18px;
+        margin-top: 15px;
         margin-bottom: 10px;
+    }
+    .pattern-tag {
+        background-color: #2563eb;
+        color: #ffffff;
+        padding: 3px 12px;
+        border-radius: 12px;
+        font-size: 0.8rem;
+        font-weight: 700;
+        display: inline-block;
+        margin-bottom: 8px;
+        letter-spacing: 0.5px;
+    }
+    .explanation-box-correct {
+        background-color: #064e3b;
+        border-left: 5px solid #10b981;
+        padding: 14px 18px;
+        border-radius: 6px;
+        margin-top: 12px;
+        color: #ecfdf5;
+    }
+    .explanation-box-wrong {
+        background-color: #450a0a;
+        border-left: 5px solid #ef4444;
+        padding: 14px 18px;
+        border-radius: 6px;
+        margin-top: 12px;
+        color: #fef2f2;
+    }
+    .explanation-box-neutral {
+        background-color: #0f172a;
+        border-left: 5px solid #3b82f6;
+        padding: 14px 18px;
+        border-radius: 6px;
+        margin-top: 12px;
+        color: #f8fafc;
+    }
+    .score-banner {
+        background: #1e293b;
+        border: 1px solid #475569;
+        border-radius: 10px;
+        padding: 12px 20px;
+        display: flex;
+        justify-content: space-around;
+        margin-bottom: 20px;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# 10 CG Vyapam Question Patterns Strictly Enforced
-class VyapamPatternEnum(str, Enum):
-    P1 = "1. One-Liner MCQ (Direct Fact / Formula Based)"
-    P2 = "2. True / False Pairing Question (Statement 1 & Statement 2)"
-    P3 = "3. Match the Following (Column A vs Column B)"
-    P4 = "4. Chronological / Logical Sequence Question"
-    P5 = "5. 'Not Correct' / Galat Kathan Question"
-    P6 = "6. Assertion (A) & Reason (R) Question"
-    P7 = "7. Multi-Statement Question (Statements 1, 2, 3)"
-    P8 = "8. Concept-Based / Application Question"
-    P9 = "9. Analytical / Elimination-Based Question"
-    P10 = "10. High-Yield PYQ Level Standard MCQ"
-
-class MCQQuestion(BaseModel):
-    id: int
-    pattern_type: VyapamPatternEnum = Field(description="Must strictly be one of the 10 CG Vyapam patterns")
-    question_text: str = Field(description="Question body in clear CBSE English + technical Hinglish terms matching the pattern")
-    options: List[str] = Field(description="Exactly 4 options: A) ..., B) ..., C) ..., D) ...")
-    correct_option: str = Field(description="Exact string matching one of the options")
-    explanation: str = Field(description="Authentic explanation referencing NCERT / Standard Granth Academy facts")
-
-class QuizResponse(BaseModel):
-    subject: str
-    chapter: str
-    questions: List[MCQQuestion]
-
-# Official Syllabus Mapped Strictly to NCERT Units
-FULL_SYLLABUS = {
-    "🧪 Chemistry (Class 11 & 12 NCERT) [30 Marks]": [
-        "Some Basic Concepts of Chemistry (Mole Concept)",
-        "Structure of Atom",
-        "Classification of Elements & Periodicity",
-        "Chemical Bonding and Molecular Structure",
-        "Chemical Thermodynamics & Energetics",
-        "Equilibrium (Physical, Chemical & Ionic)",
-        "Redox Reactions",
-        "Organic Chemistry: Basic Principles & Mechanisms",
-        "Hydrocarbons (Alkanes, Alkenes, Alkynes, Arenes)",
-        "Solutions & Colligative Properties",
-        "Electrochemistry",
-        "Chemical Kinetics",
-        "d- and f-Block Elements (Transition Metals)",
-        "Coordination Compounds",
-        "Haloalkanes and Haloarenes",
-        "Alcohols, Phenols and Ethers",
-        "Aldehydes, Ketones and Carboxylic Acids",
-        "Amines (Organic Nitrogen Compounds)",
-        "Biomolecules (Carbs, Proteins, Nucleic Acids, Lipids)",
-        "Polymers & Chemistry in Everyday Life"
-    ],
-    "⚡ Physics (Class 11 & 12 NCERT) [10 Marks]": [
-        "Units and Measurements",
-        "Kinematics (Motion in 1D & 2D)",
-        "Laws of Motion & Friction",
-        "Work, Energy and Power",
-        "Rotational Motion & System of Particles",
-        "Gravitation",
-        "Mechanical Properties of Solids & Fluids",
-        "Thermodynamics & Kinetic Theory of Gases",
-        "Oscillations & Waves (Sound)",
-        "Electrostatics & Capacitance",
-        "Current Electricity & Circuits",
-        "Magnetism, Moving Charges & Matter",
-        "Electromagnetic Induction & Alternating Current",
-        "Optics (Ray Optics & Wave Optics)",
-        "Modern Physics (Dual Nature, Atoms, Nuclei)",
-        "Semiconductor Devices & Digital Electronics"
-    ],
-    "🌿 Biology (Class 11 & 12 NCERT) [10 Marks]": [
-        "The Living World & Biological Classification",
-        "Plant Kingdom & Animal Kingdom",
-        "Morphology & Anatomy of Flowering Plants",
-        "Structural Organisation in Animals (Tissues)",
-        "Cell: Structure and Functions",
-        "Biomolecules & Enzymes",
-        "Cell Cycle and Cell Division",
-        "Plant Physiology (Photosynthesis, Respiration, Growth)",
-        "Human Physiology: Digestion & Respiration",
-        "Human Physiology: Body Fluids & Circulation",
-        "Human Physiology: Excretion & Locomotion",
-        "Human Physiology: Neural & Endocrine Coordination",
-        "Reproduction in Plants and Humans",
-        "Genetics: Principles of Inheritance & Molecular Basis",
-        "Evolution",
-        "Human Health, Disease & Immunity",
-        "Biotechnology: Principles and Applications",
-        "Ecology, Ecosystem & Environmental Issues"
-    ],
-    "🏛️ Chhattisgarh GK [10 Marks]": [
-        "CG History: Ancient Dynasties (Nal, Sharabhpuriya, Pandu)",
-        "CG History: Kalchuri Dynasty (Ratanpur & Raipur)",
-        "CG History: Bastar Dynasties & Kakatiya Vansh",
-        "Maratha Rule, Suba System & British Treaties",
-        "Tribal Revolts of Bastar (Tarapur, Mediya, Bhoomkal)",
-        "Freedom Movement in CG (1857 & National Movement)",
-        "CG Geography: Physical Divisions, Rivers & Waterfalls",
-        "CG Climate, Soils, Agriculture & Forests",
-        "Mineral, Energy & Water Resources of CG",
-        "CG Tribes, Ghotul System & Customs",
-        "Folk Literature, Dance, Music, Arts & Festivals",
-        "Administrative Setup, Urban Bodies & Panchayati Raj",
-        "Economic Survey of CG & Budget Facts"
-    ],
-    "🇮🇳 General Knowledge of India [10 Marks]": [
-        "Indian History: Ancient & Medieval India",
-        "Indian National Movement & Modern History",
-        "Physical, Social & Economic Geography of India",
-        "Indian Constitution: Fundamental Rights & Duties",
-        "Union Executive, Parliament & Judiciary",
-        "Indian Economy, Budget & Banking",
-        "Science & Technology & Environmental Ecology",
-        "National & International Current Affairs"
-    ],
-    "🧠 Aptitude & Logical Reasoning [10 Marks]": [
-        "Number Series & Alphabet Coding-Decoding",
-        "Blood Relations & Direction Sense Test",
-        "Syllogism, Venn Diagrams & Logical Deductions",
-        "Basic Numeracy: Percentages, Profit & Loss",
-        "Basic Numeracy: Ratio, Proportion & Averages",
-        "Time, Work, Speed & Distance",
-        "Data Interpretation (Bar Graphs, Tables, Pie Charts)",
-        "Communication & Interpersonal Decision Making"
-    ],
-    "💻 Computer Knowledge [05 Marks]": [
-        "Computer Hardware Architecture (CPU, Memory, Storage)",
-        "Input, Output & Peripheral Devices",
-        "Operating Systems (Windows, Linux, Command Line)",
-        "MS Office Suite: MS Word & MS Excel Functions",
-        "Internet Protocols, Search Engines & Browsers",
-        "Cyber Security, Viruses, Firewalls & Cryptography"
-    ],
-    "📖 General Hindi (सामान्य हिन्दी) [05 Marks]": [
-        "वर्ण विचार (स्वर, व्यंजन एवं वर्तनी शुद्धि)",
-        "संधि एवं संधि विच्छेद (स्वर, व्यंजन, विसर्ग)",
-        "समास रचना एवं उनके भेद",
-        "संज्ञा, सर्वनाम, विशेषण, क्रिया एवं कारक",
-        "तत्सम, तद्भव, देशज, विदेशज, उपसर्ग एवं प्रत्यय",
-        "रस, अलंकार, दोहा, छंद एवं सोरठा",
-        "पर्यायवाची, विलोम, अनेकार्थी एवं एक शब्द",
-        "मुहावरे एवं लोकोक्तियां"
-    ],
-    "🗣️ Chhattisgarhi Language [05 Marks]": [
-        "छत्तीसगढ़ी व्याकरण (संज्ञा, सर्वनाम, कारक, क्रिया)",
-        "छत्तीसगढ़ी जनउला (पहेलियां / Riddles)",
-        "छत्तीसगढ़ी हाना (लोकोक्तियां / Proverbs)",
-        "छत्तीसगढ़ी मुहावरे एवं प्रचलित लोकोक्तियां"
-    ],
-    "🔤 English Language [05 Marks]": [
-        "Articles, Determiners & Prepositions",
-        "Tenses & Subject-Verb Agreement",
-        "Active and Passive Voice",
-        "Direct and Indirect Speech (Narration)",
-        "Vocabulary: Synonyms, Antonyms & One Word Substitution",
-        "Idioms, Phrases & Spelling Correction"
-    ]
+# ----------------- FULL OFFICIAL SYLLABUS DATA -----------------
+SYLLABUS_TREE = {
+    "Part 2: Chemistry [30 Marks]": {
+        "Physical Chemistry (Class 11)": [
+            "Class 11 - Ch 1: Some Basic Concepts of Chemistry (Mole Concept)",
+            "Class 11 - Ch 5: States of Matter: Gases and Liquids",
+            "Class 11 - Ch 6: Chemical Thermodynamics",
+            "Class 11 - Ch 7: Equilibrium",
+            "Class 11 - Ch 8: Redox Reactions (Basics for Electrochemistry & Titrations)"
+        ],
+        "Physical Chemistry (Class 12)": [
+            "Class 12 - Ch 1: The Solid State",
+            "Class 12 - Ch 2: Solutions",
+            "Class 12 - Ch 3: Electrochemistry",
+            "Class 12 - Ch 4: Chemical Kinetics",
+            "Class 12 - Ch 5: Surface Chemistry"
+        ],
+        "Inorganic Chemistry (Class 11 & 12)": [
+            "Class 11 - Ch 2: Structure of Atom",
+            "Class 11 - Ch 3: Classification of Elements and Periodicity in Properties",
+            "Class 11 - Ch 4: Chemical Bonding and Molecular Structure",
+            "Class 12 - Ch 6: General Principles and Processes of Isolation of Elements (Metallurgy)",
+            "Class 12 - Ch 8: The d- and f-Block Elements",
+            "Class 12 - Ch 9: Coordination Compounds"
+        ],
+        "Organic & Biochemistry (Class 11 & 12)": [
+            "Class 11 - Ch 12: Organic Chemistry – Some Basic Principles and Techniques (GOC)",
+            "Class 11 - Ch 13: Hydrocarbons",
+            "Class 12 - Ch 10: Haloalkanes and Haloarenes",
+            "Class 12 - Ch 11: Alcohols, Phenols and Ethers",
+            "Class 12 - Ch 12: Aldehydes, Ketones and Carboxylic Acids",
+            "Class 12 - Ch 13: Amines",
+            "Class 12 - Ch 14: Biomolecules",
+            "Class 12 - Ch 15: Polymers",
+            "Class 12 - Ch 16: Chemistry in Everyday Life"
+        ]
+    },
+    "Part 2: Physics [10 Marks]": {
+        "Mechanics (Class 11)": [
+            "Class 11 - Ch 2: Units and Measurements",
+            "Class 11 - Ch 3: Motion in a Straight Line",
+            "Class 11 - Ch 4: Motion in a Plane",
+            "Class 11 - Ch 5: Laws of Motion",
+            "Class 11 - Ch 6: Work, Energy and Power",
+            "Class 11 - Ch 7: System of Particles and Rotational Motion",
+            "Class 11 - Ch 8: Gravitation",
+            "Class 11 - Ch 9: Mechanical Properties of Solids",
+            "Class 11 - Ch 10: Mechanical Properties of Fluids"
+        ],
+        "Heat, Thermodynamics & Waves (Class 11)": [
+            "Class 11 - Ch 11: Thermal Properties of Matter",
+            "Class 11 - Ch 12: Thermodynamics",
+            "Class 11 - Ch 13: Kinetic Theory of Gases",
+            "Class 11 - Ch 14: Oscillations",
+            "Class 11 - Ch 15: Waves"
+        ],
+        "Electricity & Magnetism (Class 12)": [
+            "Class 12 - Ch 1: Electric Charges and Fields",
+            "Class 12 - Ch 2: Electrostatic Potential and Capacitance",
+            "Class 12 - Ch 3: Current Electricity",
+            "Class 12 - Ch 4: Moving Charges and Magnetism",
+            "Class 12 - Ch 5: Magnetism and Matter",
+            "Class 12 - Ch 6: Electromagnetic Induction",
+            "Class 12 - Ch 7: Alternating Current",
+            "Class 12 - Ch 8: Electromagnetic Waves"
+        ],
+        "Optics & Modern Physics (Class 12)": [
+            "Class 12 - Ch 9: Ray Optics and Optical Instruments",
+            "Class 12 - Ch 10: Wave Optics",
+            "Class 12 - Ch 11: Dual Nature of Radiation and Matter",
+            "Class 12 - Ch 12: Atoms",
+            "Class 12 - Ch 13: Nuclei",
+            "Class 12 - Ch 14: Semiconductor Electronics"
+        ]
+    },
+    "Part 2: Biology [10 Marks]": {
+        "Botany & Diversity (Class 11)": [
+            "Class 11 - Ch 1: The Living World",
+            "Class 11 - Ch 2: Biological Classification",
+            "Class 11 - Ch 3: Plant Kingdom",
+            "Class 11 - Ch 5: Morphology of Flowering Plants",
+            "Class 11 - Ch 6: Anatomy of Flowering Plants",
+            "Class 11 - Ch 13: Photosynthesis in Higher Plants",
+            "Class 11 - Ch 14: Respiration in Plants",
+            "Class 11 - Ch 15: Plant Growth and Development"
+        ],
+        "Cell Biology & Zoology / Physiology (Class 11)": [
+            "Class 11 - Ch 8: Cell: The Unit of Life",
+            "Class 11 - Ch 9: Biomolecules",
+            "Class 11 - Ch 10: Cell Cycle and Cell Division",
+            "Class 11 - Ch 4: Animal Kingdom",
+            "Class 11 - Ch 7: Structural Organisation in Animals",
+            "Class 11 - Ch 17: Breathing and Exchange of Gases",
+            "Class 11 - Ch 18: Body Fluids and Circulation",
+            "Class 11 - Ch 19: Excretory Products and their Elimination",
+            "Class 11 - Ch 20: Locomotion and Movement",
+            "Class 11 - Ch 21: Neural Control and Coordination",
+            "Class 11 - Ch 22: Chemical Coordination and Integration"
+        ],
+        "Reproduction, Genetics & Evolution (Class 12)": [
+            "Class 12 - Ch 1: Reproduction in Organisms",
+            "Class 12 - Ch 2: Sexual Reproduction in Flowering Plants",
+            "Class 12 - Ch 3: Human Reproduction",
+            "Class 12 - Ch 4: Reproductive Health",
+            "Class 12 - Ch 5: Principles of Inheritance and Variation",
+            "Class 12 - Ch 6: Molecular Basis of Inheritance",
+            "Class 12 - Ch 7: Evolution"
+        ],
+        "Biotech, Health & Ecology (Class 12)": [
+            "Class 12 - Ch 8: Human Health and Disease",
+            "Class 12 - Ch 9: Strategies for Enhancement in Food Production",
+            "Class 12 - Ch 10: Microbes in Human Welfare",
+            "Class 12 - Ch 11: Biotechnology – Principles and Processes",
+            "Class 12 - Ch 12: Biotechnology and its Applications",
+            "Class 12 - Ch 13: Organisms and Populations",
+            "Class 12 - Ch 14: Ecosystem",
+            "Class 12 - Ch 15: Biodiversity and Conservation",
+            "Class 12 - Ch 16: Environmental Issues"
+        ]
+    },
+    "Part 1: General Knowledge of India [10 Marks]": {
+        "Indian GS Core": [
+            "History of India",
+            "Physical, Social & Economic Geography of India",
+            "Constitution of India",
+            "Indian Economy",
+            "Social Science",
+            "Science & Technology",
+            "Indian Art, Literature & Culture",
+            "Environment & Ecology",
+            "Sports",
+            "Current Affairs (National & International)"
+        ]
+    },
+    "Part 1: General Knowledge of Chhattisgarh [10 Marks]": {
+        "CG Special Topics": [
+            "History of CG (Kakatiya Vansh, Kalchuri, Tribal Revolts)",
+            "Geography, Climate, Physical Conditions, Demographics & Census",
+            "Archaeological & Tourist Places",
+            "Literature, Music, Dance, Art & Culture",
+            "Special Traditions, Festivals & Rituals (Bastar Dussehra, Danteshwari)",
+            "Economy of CG, Forests & Agriculture",
+            "Administrative Setup, Local Governance & Panchayati Raj",
+            "Industry, Energy, Water & Mineral Resources",
+            "Current Affairs of Chhattisgarh"
+        ]
+    },
+    "Part 1: Aptitude & Reasoning [10 Marks]": {
+        "Aptitude Topics": [
+            "Interpersonal Skills including Communication Skills",
+            "Logical Reasoning & Analytical Ability",
+            "Decision Making & Problem Solving",
+            "General Mental Ability",
+            "Basic Numeracy (General Mathematical Skills)",
+            "Data Interpretation (Charts, Graphs, Tables, Data Sufficiency)"
+        ]
+    },
+    "Part 1: Computer Knowledge [05 Marks]": {
+        "Computer Modules": [
+            "Computer Hardware & Software Architecture",
+            "Operating Systems (OS)",
+            "Internet Applications, Networking & Cybersecurity"
+        ]
+    },
+    "Part 1: Hindi Language [05 Marks]": {
+        "Hindi Vyakaran": [
+            "Vowels, Consonants, Spelling (स्वर, व्यंजन, वर्तनी)",
+            "Gender, Number, Tense (लिंग, वचन, काल)",
+            "Noun, Pronoun, Adjective, Adverb, Case (संज्ञा, सर्वनाम, विशेषण, कारक)",
+            "Compound Words (Samas - Construction & Types / समास)",
+            "Sandhi (Vowel, Consonant, Visarga / संधि)",
+            "Rasa & Alankar, Doha, Chhand, Sortha (रस, अलंकार, छंद)",
+            "Grammatical Errors & Corrections",
+            "Words, Vocabulary & One Word Substitution (विलोम, पर्यायवाची)",
+            "Idioms & Proverbs (मुहावरे और लोकोक्तियाँ)"
+        ]
+    },
+    "Part 1: Chhattisgarhi Language [05 Marks]": {
+        "Chhattisgarhi Core": [
+            "Janaula (Riddles / जनउला)",
+            "Idioms (Muhavare / मुहावरे)",
+            "Chhattisgarhi Grammar & Pronouns (छत्तीसगढ़ी व्याकरण)",
+            "Hana (Proverbs) & Sayings (हाना एवं लोकोक्तियां)"
+        ]
+    },
+    "Part 1: English Language [05 Marks]": {
+        "English Grammar": [
+            "Number, Gender, Articles",
+            "Pronouns, Adjectives, Verbs, Adverbs",
+            "Use of Some Important Conjunctions",
+            "Use of Some Important Prepositions",
+            "Active / Passive Voice",
+            "Direct / Indirect Narration",
+            "Synonyms & Antonyms",
+            "One Word Substitution",
+            "Spelling, Proverbs, Idioms and Phrases"
+        ]
+    }
 }
 
-# Sidebar Navigation & Settings
+# ----------------- SIDEBAR CONTROLS -----------------
 with st.sidebar:
-    st.markdown("### ⚙️ Engine Control")
-    api_key = st.secrets.get("GEMINI_API_KEY", "")
-    if not api_key:
-        api_key = st.text_input("Gemini API Key:", type="password")
-    else:
-        st.success("🔑 API Key Connected")
+    st.markdown("### ⚙️ Practice Engine Control")
     
-    num_q = st.select_slider("Question Count:", options=[10, 20, 30, 40, 50], value=20)
-    lang_pref = st.selectbox("Preferred Language:", [
-        "English with Hinglish (Standard CBSE/Vyapam)",
-        "Bilingual (Hindi + English)",
-        "Pure English",
-        "Pure Hindi (हिंदी)"
-    ])
-    st.markdown("---")
-    st.markdown("🎯 **Target Exam:** CG Vyapam FWLN26")
-    st.caption("Mapped strictly to NCERT Class 11-12 & Official Syllabus")
+    api_key = st.secrets.get("GEMINI_API_KEY", None)
+    if api_key:
+        st.success("🔑 API Key Connected", icon="✅")
+        genai.configure(api_key=api_key)
+    else:
+        api_key = st.text_input("Enter Gemini API Key:", type="password")
+        if api_key:
+            genai.configure(api_key=api_key)
+        else:
+            st.error("Set GEMINI_API_KEY in Streamlit Secrets.")
 
-# Main Header Container
+    st.markdown("---")
+    question_count = st.slider("Questions per Batch:", min_value=5, max_value=50, value=10, step=5)
+    
+    language_pref = st.selectbox(
+        "Explanation Language:",
+        ["English with Hinglish (Standard Technical Terms)", "Pure English", "Hindi / Chhattisgarhi"]
+    )
+    
+    st.markdown("---")
+    st.markdown("""
+    **🎯 Target:** CG Vyapam FWLN26  
+    **Mode:** Active Practice & Instant Explanation  
+    **Standard:** NCERT Class 11-12 & CG Granth Academy
+    """)
+
+# ----------------- MAIN UI -----------------
 st.markdown("""
-<div class='main-header'>
-    <div class='main-title'>⚡ CG Vyapam FWLN26 Practice Engine</div>
-    <div class='main-subtitle'>Strict NCERT Chapter-wise Mapping • 10 Exam Pattern Allocation • Authentic Granth Academy & PYQ Standard</div>
+<div class="main-header">
+    <h2 style="margin:0; color:#f8fafc;">⚡ CG Vyapam FWLN26 Practice Engine</h2>
+    <p style="margin:5px 0 0 0; color:#94a3b8;">Interactive Practice Mode • Instant Answer Reveal & NCERT Deep Explanation</p>
 </div>
 """, unsafe_allow_html=True)
 
-# Select Subject & Chapter
-col1, col2 = st.columns([1, 1])
+col1, col2 = st.columns(2)
 with col1:
-    selected_subject = st.selectbox("1. Select Subject / Stream:", list(FULL_SYLLABUS.keys()))
+    selected_subject = st.selectbox("1. Select Subject / Part:", list(SYLLABUS_TREE.keys()))
 
 with col2:
-    chapter_options = FULL_SYLLABUS[selected_subject] + ["+ Custom Topic (Manual Entry)"]
-    selected_chapter = st.selectbox("2. Select NCERT Unit / Chapter:", chapter_options)
+    sub_categories = SYLLABUS_TREE[selected_subject]
+    selected_subcat = st.selectbox("2. Select Category / Unit:", list(sub_categories.keys()))
 
-if selected_chapter == "+ Custom Topic (Manual Entry)":
-    final_chapter = st.text_input("Enter Topic Name:", placeholder="e.g., Optical Isomerism, Danteshwari Temple...")
-else:
-    final_chapter = selected_chapter
+selected_chapter = st.selectbox("3. Select Chapter / Topic:", sub_categories[selected_subcat])
 
-# Test Generation Button
-if st.button("🚀 Launch 10-Pattern Test Set", type="primary", use_container_width=True):
+# ----------------- AI GENERATION ENGINE -----------------
+def generate_questions(subject, chapter, count, lang):
+    prompt = f"""
+    You are an expert examiner and professor setting high-standard practice MCQs for CG Vyapam FWLN26 (Food & Drug Administration Lab Assistant / Namuna Sahayak).
+    Generate strictly {count} challenging MCQs mapped strictly to:
+    - Subject: {subject}
+    - Specific Chapter/Topic: {chapter}
+    - Language Style: {lang}
+
+    STRICT 10 EXAM PATTERNS TO ROTATE ACROSS QUESTIONS:
+    1. Multi-Statement Evaluation (Statements 1, 2, 3 -> Choose correct: Only 1 & 2, All, etc.)
+    2. Match the Following (List-I with List-II)
+    3. Assertion-Reason (A & R format)
+    4. Chronological / Sequential Order Arrangement
+    5. 'NOT Correct' / 'INCORRECT' identification
+    6. Concept & Mechanism Depth (CBSE/NCERT Class 11-12 standard)
+    7. Data / Table / Property Comparison
+    8. Direct Standard PYQ Vyapam Standard
+    9. Case / Application Based Practical Question
+    10. Pair Identification (Correctly matched / Incorrectly matched)
+
+    OUTPUT FORMAT REQUIREMENTS:
+    Return ONLY a valid JSON array of objects. Do not include markdown ticks like ```json.
+    Each object must have the following keys:
+    - "id": integer (1 to {count})
+    - "pattern": string (Name of the pattern used from the 10 patterns)
+    - "question": string (The full question text including any statements/tables/lists)
+    - "options": list of 4 strings (e.g. ["A) ...", "B) ...", "C) ...", "D) ..."])
+    - "correct_answer": string (Single capital letter: "A", "B", "C", or "D")
+    - "explanation": string (Step-by-step rigorous NCERT/Authentic explanation in Hinglish/English with key concepts, reactions/formulas, or historical facts)
+    """
+
+    model = genai.GenerativeModel("gemini-2.0-flash")
+    response = model.generate_content(
+        prompt,
+        generation_config={"response_mime_type": "application/json"}
+    )
+    return response.text
+
+# ----------------- GENERATE BUTTON -----------------
+if st.button("🚀 Load Practice MCQs", use_container_width=True, type="primary"):
     if not api_key:
-        st.error("⚠️ Gemini API Key is required!")
-    elif not final_chapter or not final_chapter.strip():
-        st.warning("⚠️ Please select a valid chapter.")
+        st.error("Please connect your Gemini API Key first!")
     else:
-        with st.spinner(f"Generating {num_q} standard Vyapam MCQs for '{final_chapter}'..."):
+        with st.spinner(f"Generating {question_count} practice questions for '{selected_chapter}'..."):
             try:
-                client = genai.Client(api_key=api_key)
+                raw_json = generate_questions(selected_subject, selected_chapter, question_count, language_pref)
+                cleaned_json = raw_json.strip()
+                if cleaned_json.startswith("```json"):
+                    cleaned_json = cleaned_json[7:]
+                if cleaned_json.endswith("```"):
+                    cleaned_json = cleaned_json[:-3]
                 
-                system_prompt = f"""
-                You are the official Chief Question Setter for the CG Vyapam FWLN26 Recruitment Examination.
-                Generate {num_q} high-standard examination MCQs strictly for:
-                - Subject: '{selected_subject}'
-                - Chapter / Unit: '{final_chapter}'
-                - Language Style: '{lang_pref}'
-                
-                MANDATORY RULES:
-                1. STRICT PATTERN MIX: Distribute questions evenly across all 10 CG Vyapam patterns (One-liner, Multi-statement, Match following, Chronological sequence, Not correct, Assertion-Reason, Concept application, Elimination, PYQ standard).
-                2. STRICT NCERT & GRANTH ACADEMY STANDARDS: For Chemistry, Physics, and Biology, adhere strictly to CBSE NCERT Class 11-12 curriculum with exact scientific terminology. For CG GK, adhere to CG Granth Academy.
-                3. Avoid repetitive facts. Ensure options are authentic with strong distractors.
-                """
-
-                response = client.models.generate_content(
-                    model='gemini-2.5-flash',
-                    contents=f"Generate {num_q} MCQs on {final_chapter} ({selected_subject})",
-                    config=types.GenerateContentConfig(
-                        system_instruction=system_prompt,
-                        response_mime_type="application/json",
-                        response_schema=QuizResponse,
-                        temperature=0.4
-                    )
-                )
-
-                st.session_state['quiz_data'] = json.loads(response.text)
-                st.session_state['user_answers'] = {}
-                st.session_state['submitted'] = False
-                st.success("✅ Test loaded successfully! Complete the questions below.")
+                questions = json.loads(cleaned_json)
+                st.session_state["practice_questions"] = questions
+                # Reset selections on new question load
+                for q in questions:
+                    if f"ans_q_{q['id']}" in st.session_state:
+                        del st.session_state[f"ans_q_{q['id']}"]
+                st.success(f"Loaded {len(questions)} Practice Questions!")
             except Exception as e:
-                st.error(f"Error generating test: {e}")
+                st.error(f"Error generating questions: {str(e)}")
 
-# Interactive Quiz Section
-if 'quiz_data' in st.session_state and st.session_state['quiz_data']:
-    quiz = st.session_state['quiz_data']
-    st.markdown("---")
-    st.subheader(f"📝 Chapter: {quiz['chapter']} ({len(quiz['questions'])} Questions)")
+# ----------------- INTERACTIVE PRACTICE RENDER -----------------
+if "practice_questions" in st.session_state and st.session_state["practice_questions"]:
+    questions = st.session_state["practice_questions"]
+    
+    # Calculate Live Stats
+    attempted_count = 0
+    correct_count = 0
+    
+    for q in questions:
+        selected_val = st.session_state.get(f"ans_q_{q['id']}", None)
+        if selected_val is not None:
+            attempted_count += 1
+            if selected_val.strip().startswith(q['correct_answer'].strip().upper()):
+                correct_count += 1
 
-    with st.form("exam_form"):
-        for q in quiz['questions']:
-            st.markdown(f"<div class='badge-pattern'>Type: {q['pattern_type']}</div>", unsafe_allow_html=True)
-            st.markdown(f"**Q{q['id']}. {q['question_text']}**")
-            
-            user_choice = st.radio(
-                f"Option selection for Q{q['id']}",
-                q['options'],
-                index=None,
-                key=f"q_{q['id']}",
-                label_visibility="collapsed"
-            )
-            st.session_state['user_answers'][q['id']] = user_choice
-            st.markdown("<br>", unsafe_allow_html=True)
+    # Live Practice Status Bar
+    st.markdown(f"""
+    <div style="background: #1e293b; border: 1px solid #3b82f6; border-radius: 8px; padding: 12px 20px; margin: 20px 0;">
+        <span style="font-size: 1rem; color: #94a3b8;">Practice Progress: </span>
+        <strong style="color: #60a5fa; font-size: 1.1rem;">Attempted {attempted_count}/{len(questions)}</strong> | 
+        <span style="font-size: 1rem; color: #94a3b8;"> Correct: </span>
+        <strong style="color: #34d399; font-size: 1.1rem;">{correct_count}</strong> | 
+        <span style="font-size: 1rem; color: #94a3b8;"> Accuracy: </span>
+        <strong style="color: #fbbf24; font-size: 1.1rem;">{(correct_count/attempted_count*100) if attempted_count > 0 else 0:.1f}%</strong>
+    </div>
+    """, unsafe_allow_html=True)
 
-        if st.form_submit_button("📊 Submit Test & Generate Scorecard", type="primary", use_container_width=True):
-            st.session_state['submitted'] = True
+    # Render Each Question with Instant Reveal
+    for q in questions:
+        st.markdown(f"""
+        <div class="question-card">
+            <span class="pattern-tag">Pattern: {q.get('pattern', 'Vyapam Standard')}</span>
+            <p style="font-size: 1.05rem; font-weight: 600; color: #f8fafc; margin-top: 6px; line-height: 1.5;">
+                Q{q['id']}. {q['question'].replace(chr(10), '<br>')}
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
 
-    # Performance Evaluation & Explanations
-    if st.session_state.get('submitted', False):
-        score = sum(1 for q in quiz['questions'] if st.session_state['user_answers'].get(q['id']) == q['correct_option'])
-        total = len(quiz['questions'])
-        accuracy = (score / total) * 100
+        user_choice = st.radio(
+            f"Select Option for Q{q['id']}:",
+            q['options'],
+            index=None,
+            key=f"ans_q_{q['id']}",
+            label_visibility="collapsed"
+        )
+
+        correct_letter = q['correct_answer'].strip().upper()
+
+        # Instant Evaluation Box
+        if user_choice is not None:
+            if user_choice.strip().startswith(correct_letter):
+                st.markdown(f"""
+                <div class="explanation-box-correct">
+                    <strong>✅ Sahi Jawab! (Option {correct_letter})</strong><br><br>
+                    <strong>📖 NCERT / Core Explanation:</strong><br>
+                    {q['explanation']}
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown(f"""
+                <div class="explanation-box-wrong">
+                    <strong>❌ Galat Jawab! Sahi Option: {correct_letter}</strong><br><br>
+                    <strong>📖 NCERT / Core Explanation:</strong><br>
+                    {q['explanation']}
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            # Option to reveal without answering
+            with st.expander("💡 Direct Answer & Explanation Dekhein (Bina Attempt Kiye)"):
+                st.markdown(f"""
+                <div class="explanation-box-neutral">
+                    <strong>Correct Option: {correct_letter}</strong><br><br>
+                    <strong>📖 NCERT / Core Explanation:</strong><br>
+                    {q['explanation']}
+                </div>
+                """, unsafe_allow_html=True)
         
-        st.balloons()
-        col_m1, col_m2 = st.columns(2)
-        with col_m1:
-            st.metric(label="🎯 Final Score", value=f"{score} / {total}")
-        with col_m2:
-            st.metric(label="📈 Accuracy Rate", value=f"{accuracy:.1f}%")
-        
-        st.markdown("### 🔍 Detailed Solutions & Conceptual Explanations")
-        for q in quiz['questions']:
-            user_ans = st.session_state['user_answers'].get(q['id'])
-            is_correct = (user_ans == q['correct_option'])
-            status_text = "✅ Correct" if is_correct else "❌ Incorrect"
-            
-            with st.expander(f"Q{q['id']}: {q['question_text'][:80]}... [{status_text}]"):
-                st.write(f"**Your Choice:** {user_ans if user_ans else 'Not Attempted'}")
-                st.write(f"**Correct Answer:** {q['correct_option']}")
-                st.info(f"💡 **NCERT / Authentic Explanation:** {q['explanation']}")
+        st.markdown("<hr style='border-color: #334155; margin: 25px 0;'>", unsafe_allow_html=True)
