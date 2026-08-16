@@ -355,7 +355,7 @@ def generate_questions(subject, chapter, count, lang):
     - "explanation": string (Step-by-step rigorous NCERT/Authentic explanation in Hinglish/English with key concepts, reactions/formulas, or historical facts)
     """
 
-    model = genai.GenerativeModel("gemini-2.0-flash")
+    model = genai.GenerativeModel("gemini-3.7-flash")
     response = model.generate_content(
         prompt,
         generation_config={"response_mime_type": "application/json"}
